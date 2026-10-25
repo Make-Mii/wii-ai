@@ -6,17 +6,21 @@ from pathlib import Path
 
 from VideoCapture import VideoCapture
 from Segmentator import Segmentator
-from utils import mask_to_image, combine_masks, crop_image_to_mask, save_image,cartoonify
+from utils import (
+    mask_to_image,
+    combine_masks,
+    crop_image_to_mask,
+    save_image,
+    cartoonify,
+)
 from pipeline import process_segmented_face
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data"
-WII_IP = "10.236.53.252"
-
-
+WII_IP = "100"
 
 
 def main():
-    vid_cap = VideoCapture(source=0, max_queue_size=2)
+    vid_cap = VideoCapture(source=33, max_queue_size=2)
     vid_cap.start()
 
     MODEL_PATH = Path(__file__).resolve().parent.parent / "models/face_landmarker.task"
@@ -34,14 +38,13 @@ def main():
     cv2.resizeWindow("Hair Segmentation", 600, 600)
     cv2.namedWindow("Face part mask", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Face part mask", 600, 600)
- 
 
     # Background worker state so CLIP never blocks the video stream
     worker_busy = threading.Event()
 
-    def async_worker(frame_bgr, masks_copy, hair_mask_copy,save_bool):
+    def async_worker(frame_bgr, masks_copy, hair_mask_copy, save_bool):
         try:
-            save_face_parts(frame_bgr, masks_copy, hair_mask_copy,save_bool)
+            save_face_parts(frame_bgr, masks_copy, hair_mask_copy, save_bool)
         except Exception as e:
             print(f"[Worker Error] {e}")
         finally:
@@ -52,7 +55,6 @@ def main():
             frame = vid_cap.read_queue()
             if frame is None:
                 continue
-
 
             # Initialize before the while loop:
             last_ts = -1
@@ -73,12 +75,11 @@ def main():
             if hair_mask is not None:
                 cv2.imshow("Hair Segmentation", hair_mask)
 
-
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
 
-            save_key_pressed = (key == ord("s"))
+            save_key_pressed = key == ord("s")
 
             # Trigger every 3 seconds (or immediately on SPACEBAR) if worker is free
             ready = (
@@ -93,13 +94,17 @@ def main():
             if (
                 ready
                 and not worker_busy.is_set()
-                and ((now - last_trigger_time > 3.0) or key == ord(" ") or save_key_pressed)
+                and (
+                    (now - last_trigger_time > 3.0)
+                    or key == ord(" ")
+                    or save_key_pressed
+                )
             ):
                 last_trigger_time = now
                 worker_busy.set()
                 threading.Thread(
                     target=async_worker,
-                    args=(frame.copy(), masks, hair_mask.copy(),save_key_pressed),
+                    args=(frame.copy(), masks, hair_mask.copy(), save_key_pressed),
                     daemon=True,
                 ).start()
 
@@ -108,7 +113,7 @@ def main():
         cv2.destroyAllWindows()
 
 
-def save_face_parts(frame_bgr, masks, hair_mask,save_images=False):
+def save_face_parts(frame_bgr, masks, hair_mask, save_images=False):
     OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 
     # Convert BGR camera frame to RGB so CIELAB color matching gets true colors!
@@ -156,7 +161,7 @@ def save_face_parts(frame_bgr, masks, hair_mask,save_images=False):
         for name, img in imgs.items():
             if img is not None and img.size > 0:
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                #img_bgr = cartoonify(img_bgr)
+                # img_bgr = cartoonify(img_bgr)
                 save_image(img_bgr, OUTPUT_PATH, name)
 
     process_segmented_face(imgs, wii_ip=WII_IP, format_type="official")

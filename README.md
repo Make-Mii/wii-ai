@@ -35,12 +35,13 @@ conda activate wii-ai
 
 ```bash
 pip install -r requirements.txt
+cd src
 ```
 
 4. (Optional) Update sprites:
 
 ```bash
-python src/crop_sprites.py
+python crop_sprites.py
 python normalise_eye_eyebrows.py
 python index_mii_components.py
 ```
@@ -52,7 +53,7 @@ python index_mii_components.py
 6. Run program
 
 ```bash
-python src/main.py
+python main.py
 ```
 
 ## Controls
