@@ -24,8 +24,8 @@ def process_segmented_face(
 ) -> dict:
 
     if crops["glasses"] is not None and crops["glasses"] == True:
-        crops["glasses"] = Image.open("mii_parts/transparent/glasses/glasses_06.png")
-    
+        crops["glasses"] = Image.open("../mii_parts/transparent/glasses/glasses_06.png")
+
     # 1. Normalize category names and drop empty crops
     normalized = {}
     for category, crop in crops.items():
