@@ -1,5 +1,6 @@
 import cv2
 import torch
+import os
 
 import warnings
 
@@ -13,11 +14,14 @@ from PIL import Image
 from utils import standardize_crop_for_clip
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+torch.set_num_threads(os.cpu_count())
 model, preprocess = clip.load("ViT-B/32", device=device)
 
 # Load precomputed embeddings
 GALLERY_PATH = "mii_galleries.pt"
 galleries = torch.load(GALLERY_PATH, map_location=device)
+for cat in galleries.values():
+    cat["embeddings"] = cat["embeddings"].to(device).float()
 
 # Exact hex values from the Libmii specification
 MII_PALETTES = {
@@ -62,30 +66,26 @@ MII_PALETTES_LAB = {
 }
 
 
-def match_feature(crop_input, category: str, top_k: int = 1):
-    if category not in galleries:
-        raise ValueError(
-            f"Category '{category}' not found. Available: {list(galleries.keys())}"
-        )
+def match_features_batch(crops: dict, top_k: int = 1):
+    cats = list(crops.keys())
+    tensors = torch.stack(
+        [preprocess(standardize_crop_for_clip(crops[c])) for c in cats]
+    ).to(device)
 
-    # Use the standardized preprocessor
-    gray_img = standardize_crop_for_clip(crop_input)
-    tensor = preprocess(gray_img).unsqueeze(0).to(device)
+    with torch.inference_mode():
+        embeds = model.encode_image(tensors)
+        embeds = embeds / embeds.norm(dim=-1, keepdim=True)
 
-    with torch.no_grad():
-        query_embed = model.encode_image(tensor)
-        query_embed /= query_embed.norm(dim=-1, keepdim=True)
-
-        cat_embeddings = galleries[category]["embeddings"].to(device)
-        filenames = galleries[category]["filenames"]
-
-        scores = (query_embed @ cat_embeddings.T).squeeze(0)
-        top_scores, top_indices = torch.topk(scores, k=min(top_k, len(filenames)))
-
-    return [
-        (filenames[idx.item()], float(score.item()))
-        for score, idx in zip(top_scores, top_indices)
-    ]
+        results = {}
+        for cat, emb in zip(cats, embeds):
+            gallery = galleries[cat]
+            scores = emb @ gallery["embeddings"].T
+            vals, idxs = torch.topk(scores, k=min(top_k, len(gallery["filenames"])))
+            results[cat] = [
+                (gallery["filenames"][i], v)
+                for v, i in zip(vals.tolist(), idxs.tolist())
+            ]
+    return results
 
 
 def match_color(
