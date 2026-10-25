@@ -3,6 +3,8 @@ import threading
 import cv2
 import numpy as np
 from pathlib import Path
+from glasses_detector import AnyglassesClassifier
+from torchvision import transforms
 
 from VideoCapture import VideoCapture
 from Segmentator import Segmentator
@@ -19,6 +21,38 @@ OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data"
 WII_IP = "192.168.137.126"
 
 
+from PIL import Image
+from transformers import pipeline
+
+# Loads a lightweight zero-shot CLIP or ViT classifier once at startup
+glasses_pipe = pipeline(
+    "zero-shot-image-classification", model="openai/clip-vit-base-patch32"
+)
+
+
+def has_glasses(raw_face_rgb: np.ndarray) -> bool:
+    if raw_face_rgb is None or raw_face_rgb.size == 0:
+        return False
+    try:
+        pil_img = Image.fromarray(raw_face_rgb)
+        results = glasses_pipe(
+            pil_img,
+            candidate_labels=[
+                "a close up of a face wearing eyeglasses or spectacles",
+                "a close up of a face without glasses",
+            ],
+        )
+        # results are sorted by highest score first
+        top_label = results[0]["label"]
+        score = results[0]["score"]
+        is_wearing = "wearing" in top_label and score > 0.55
+        print(f"[Debug] Glasses: {is_wearing} ({score:.2f})")
+        return bool(is_wearing)
+    except Exception as e:
+        print(f"[Glasses Error] {e}")
+        return False
+
+
 def main():
     vid_cap = VideoCapture(source=33, max_queue_size=2)
     vid_cap.start()
@@ -28,6 +62,8 @@ def main():
         Path(__file__).resolve().parent.parent / "models/hair_segmenter.tflite"
     )
     segmentator = Segmentator(str(MODEL_PATH), str(HAIR_SEG_MODEL_PATH))
+
+    # Glasses classifier
 
     start_time = time.time()
     last_trigger_time = time.time()
@@ -148,6 +184,11 @@ def save_face_parts(frame_bgr, masks, hair_mask, save_images=False):
     hair_img = crop_image_to_mask(mask_to_image(frame_rgb, hair_mask), hair_mask)
     hair_img = cartoonify(hair_img)
 
+    # Crop the raw RGB frame to the bounding box of the face mask (without blacking out eyes or cartoonifying)
+    raw_face_crop = crop_image_to_mask(frame_rgb, masks[4])
+    has_g = has_glasses(raw_face_crop)
+    print(f"Has glasses: {has_g}")
+
     imgs = {
         "hair": hair_img,
         "eyes": eye_img,
@@ -155,7 +196,6 @@ def save_face_parts(frame_bgr, masks, hair_mask, save_images=False):
         "nose": nose_img,
         "mouth": mouth_img,
         "heads": face_img,
-        "glasses": True,
     }
 
     if save_images:
@@ -165,7 +205,9 @@ def save_face_parts(frame_bgr, masks, hair_mask, save_images=False):
                 # img_bgr = cartoonify(img_bgr)
                 save_image(img_bgr, OUTPUT_PATH, name)
 
-    process_segmented_face(imgs, wii_ip=WII_IP, format_type="official")
+    process_segmented_face(
+        imgs, wii_ip=WII_IP, format_type="official", has_glasses=has_g
+    )
 
 
 if __name__ == "__main__":

@@ -20,10 +20,14 @@ CATEGORY_ALIASES = {
 
 
 def process_segmented_face(
-    crops: dict, wii_ip: str = None, port: int = 8080, format_type: str = "official"
+    crops: dict,
+    wii_ip: str = None,
+    port: int = 8080,
+    format_type: str = "official",
+    has_glasses=False,
 ) -> dict:
 
-    if crops["glasses"] is not None and crops["glasses"] == True:
+    if has_glasses:
         crops["glasses"] = Image.open("../mii_parts/transparent/glasses/glasses_06.png")
 
     # 1. Normalize category names and drop empty crops
