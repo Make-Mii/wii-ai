@@ -16,7 +16,7 @@ from utils import (
 from pipeline import process_segmented_face
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data"
-WII_IP = "100"
+WII_IP = "192.168.137.126"
 
 
 def main():

@@ -24,21 +24,21 @@ git clone https://github.com/Make-Mii/wii-ai.git
 cd wii-ai
 ```
 
-2. Create and activate conda environment:
+1. Create and activate conda environment:
 
 ```bash
 conda create -n wii-ai python=3.10 -y
 conda activate wii-ai
 ```
 
-3. Install dependencies:
+1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 cd src
 ```
 
-4. (Optional) Update sprites:
+1. (Optional) Update sprites:
 
 ```bash
 python crop_sprites.py
@@ -46,25 +46,12 @@ python normalise_eye_eyebrows.py
 python index_mii_components.py
 ```
 
-5. Configure Wii IP
+1. Configure Wii IP
 
 - Run the main application on the Wii, from there take the Wii's IP address from the top of the UI and update WII_IP at the top of `main.py`.
 
-6. Run program
+1. Run program
 
 ```bash
 python main.py
 ```
-
-## Controls
-
-Sliders Adjust:
-
-- Brightness
-- Contrast
-- Gamma
-- Saturation
-
-
-in the `stream` window to ensure clean skin and hair feature separation.
-
