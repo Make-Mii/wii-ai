@@ -6,42 +6,17 @@ from pathlib import Path
 
 from VideoCapture import VideoCapture
 from Segmentator import Segmentator
-from utils import mask_to_image, combine_masks, crop_image_to_mask
+from utils import mask_to_image, combine_masks, crop_image_to_mask, save_image,cartoonify
 from pipeline import process_segmented_face
 
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "data"
 WII_IP = "10.236.53.252"
 
 
-def apply_camera_adjustments(
-    frame: np.ndarray, brightness: int, contrast: int, sat: int, gamma_val: int
-) -> np.ndarray:
-    """Applies real-time brightness, contrast, saturation, and gamma adjustments."""
-    # 1. Brightness (-100 to +100) & Contrast (0.5x to 2.0x)
-    alpha = contrast / 100.0
-    beta = brightness - 100
-    adjusted = cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
-
-    # 2. Gamma correction (50 to 200 -> 0.5 to 2.0)
-    gamma = max(0.1, gamma_val / 100.0)
-    if abs(gamma - 1.0) > 0.05:
-        inv_gamma = 1.0 / gamma
-        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype(
-            "uint8"
-        )
-        adjusted = cv2.LUT(adjusted, table)
-
-    # 3. Saturation (0 to 200 -> 0.0x to 2.0x)
-    if abs(sat - 100) > 2:
-        hsv = cv2.cvtColor(adjusted, cv2.COLOR_BGR2HSV).astype(np.float32)
-        hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (sat / 100.0), 0, 255)
-        adjusted = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-
-    return adjusted
 
 
 def main():
-    vid_cap = VideoCapture(source=33, max_queue_size=2)
+    vid_cap = VideoCapture(source=0, max_queue_size=2)
     vid_cap.start()
 
     MODEL_PATH = Path(__file__).resolve().parent.parent / "models/face_landmarker.task"
@@ -59,21 +34,14 @@ def main():
     cv2.resizeWindow("Hair Segmentation", 600, 600)
     cv2.namedWindow("Face part mask", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Face part mask", 600, 600)
-
-    # Add on-the-fly camera sliders to the Stream window
-    cv2.createTrackbar(
-        "Brightness", "Stream", 100, 200, lambda x: None
-    )  # 100 = neutral (0)
-    cv2.createTrackbar("Contrast", "Stream", 100, 200, lambda x: None)  # 100 = 1.0x
-    cv2.createTrackbar("Gamma", "Stream", 100, 200, lambda x: None)  # 100 = 1.0
-    cv2.createTrackbar("Saturation", "Stream", 100, 200, lambda x: None)  # 100 = 1.0x
+ 
 
     # Background worker state so CLIP never blocks the video stream
     worker_busy = threading.Event()
 
-    def async_worker(frame_bgr, masks_copy, hair_mask_copy):
+    def async_worker(frame_bgr, masks_copy, hair_mask_copy,save_bool):
         try:
-            save_face_parts(frame_bgr, masks_copy, hair_mask_copy)
+            save_face_parts(frame_bgr, masks_copy, hair_mask_copy,save_bool)
         except Exception as e:
             print(f"[Worker Error] {e}")
         finally:
@@ -81,16 +49,10 @@ def main():
 
     try:
         while True:
-            raw_frame = vid_cap.read_queue()
-            if raw_frame is None:
+            frame = vid_cap.read_queue()
+            if frame is None:
                 continue
 
-            # Apply live slider settings
-            b_val = cv2.getTrackbarPos("Brightness", "Stream")
-            c_val = cv2.getTrackbarPos("Contrast", "Stream")
-            g_val = cv2.getTrackbarPos("Gamma", "Stream")
-            s_val = cv2.getTrackbarPos("Saturation", "Stream")
-            frame = apply_camera_adjustments(raw_frame, b_val, c_val, s_val, g_val)
 
             # Initialize before the while loop:
             last_ts = -1
@@ -111,15 +73,12 @@ def main():
             if hair_mask is not None:
                 cv2.imshow("Hair Segmentation", hair_mask)
 
-            # Show live debug preview if available
-            if Path("debug_preview.png").exists():
-                prev = cv2.imread("debug_preview.png")
-                if prev is not None:
-                    cv2.imshow("Mii Preview", prev)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
+
+            save_key_pressed = (key == ord("s"))
 
             # Trigger every 3 seconds (or immediately on SPACEBAR) if worker is free
             ready = (
@@ -134,13 +93,13 @@ def main():
             if (
                 ready
                 and not worker_busy.is_set()
-                and ((now - last_trigger_time > 3.0) or key == ord(" "))
+                and ((now - last_trigger_time > 3.0) or key == ord(" ") or save_key_pressed)
             ):
                 last_trigger_time = now
                 worker_busy.set()
                 threading.Thread(
                     target=async_worker,
-                    args=(frame.copy(), masks, hair_mask.copy()),
+                    args=(frame.copy(), masks, hair_mask.copy(),save_key_pressed),
                     daemon=True,
                 ).start()
 
@@ -149,7 +108,7 @@ def main():
         cv2.destroyAllWindows()
 
 
-def save_face_parts(frame_bgr, masks, hair_mask):
+def save_face_parts(frame_bgr, masks, hair_mask,save_images=False):
     OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 
     # Convert BGR camera frame to RGB so CIELAB color matching gets true colors!
@@ -158,16 +117,19 @@ def save_face_parts(frame_bgr, masks, hair_mask):
     # 1. Eyes
     eye_mask = combine_masks(masks[0][0], masks[0][1])
     eye_img = crop_image_to_mask(mask_to_image(frame_rgb, eye_mask), eye_mask)
+    eye_img = cartoonify(eye_img)
 
     # 2. Eyebrows
     brow_mask = combine_masks(masks[1][0], masks[1][1])
     brows_img = crop_image_to_mask(mask_to_image(frame_rgb, brow_mask), brow_mask)
-
+    brows_img = cartoonify(brows_img)
     # 3. Nose
     nose_img = crop_image_to_mask(mask_to_image(frame_rgb, masks[2]), masks[2])
+    nose_img = cartoonify(nose_img)
 
     # 4. Mouth
     mouth_img = crop_image_to_mask(mask_to_image(frame_rgb, masks[3]), masks[3])
+    mouth_img = cartoonify(mouth_img)
 
     # 5. Face / Skin (exclude eyes, brows, and mouth from skin color sampling!)
     skin_only_mask = masks[4].copy()
@@ -175,9 +137,11 @@ def save_face_parts(frame_bgr, masks, hair_mask):
     skin_only_mask[brow_mask > 0] = 0
     skin_only_mask[masks[3] > 0] = 0
     face_img = crop_image_to_mask(mask_to_image(frame_rgb, skin_only_mask), masks[4])
+    face_img = cartoonify(face_img)
 
     # 6. Hair
     hair_img = crop_image_to_mask(mask_to_image(frame_rgb, hair_mask), hair_mask)
+    hair_img = cartoonify(hair_img)
 
     imgs = {
         "hair": hair_img,
@@ -187,6 +151,13 @@ def save_face_parts(frame_bgr, masks, hair_mask):
         "mouth": mouth_img,
         "heads": face_img,
     }
+
+    if save_images:
+        for name, img in imgs.items():
+            if img is not None and img.size > 0:
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                #img_bgr = cartoonify(img_bgr)
+                save_image(img_bgr, OUTPUT_PATH, name)
 
     process_segmented_face(imgs, wii_ip=WII_IP, format_type="official")
 

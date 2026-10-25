@@ -25,8 +25,9 @@ def mask_to_image(frame, mask):
 
     mask_expanded = (mask > 0)[..., np.newaxis]
 
+    bg_array = np.array((255,255,255), dtype=np.uint8).reshape(1,1,3)
     # apply mask
-    result = np.where(mask_expanded, frame, 255)
+    result = np.where(mask_expanded, frame, bg_array)
 
     return result.astype(np.uint8)
 
@@ -118,3 +119,53 @@ def standardize_crop_for_clip(
             ).astype(np.uint8)
 
     return Image.fromarray(gray).convert("RGB")
+
+
+def cartoonify(image):
+    #smoothes image 
+    smooth = cv2.bilateralFilter(image, d=15, sigmaColor=75, sigmaSpace=75)
+
+    #Color Quantization (Reduce color palette to make it look flat/illustrative)
+    # groups similar colors together so it looks like a cartoon fill
+    data = smooth.reshape((-1, 3))
+    data = np.float32(data)
+    
+    # Define criteria and apply K-Means clustering (e.g., 6 to 8 main colors)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    K = 7  # Number of cartoon color levels
+    _, label, center = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+    
+    center = np.uint8(center)
+    quantized = center[label.flatten()]
+    quantized = quantized.reshape(image.shape)
+
+    # Clean outer border only (no messy internal face lines)
+    gray = cv2.cvtColor(smooth, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 100, 200)
+    
+    # Dilate edges slightly to make them smooth and bold
+    kernel = np.ones((2, 2), np.uint8)
+    edges = cv2.dilate(edges, kernel, iterations=1)
+    
+    # Turn edges into dark gray/black lines
+    cartoon = quantized.copy()
+    cartoon[edges > 0] = [30, 30, 30]  # Dark gray outline instead of harsh black noise
+
+
+    #enhance contrast
+    hsv = cv2.cvtColor(cartoon, cv2.COLOR_BGR2HSV).astype(np.float32)
+    h, s, v = cv2.split(hsv)
+
+    # Increase Saturation 
+    s = s * 1.3  #  intensity by 30%
+    v = v * 1.15 #   brightness by 15%
+    
+    # Clip values  
+    s = np.clip(s, 0, 255)
+    v = np.clip(v, 0, 255)
+
+     
+    hsv = cv2.merge([h, s, v])
+    cartoon_bright = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+    return cartoon_bright
