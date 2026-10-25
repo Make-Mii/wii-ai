@@ -69,7 +69,10 @@ MII_PALETTES_LAB = {
 def match_features_batch(crops: dict, top_k: int = 1):
     cats = list(crops.keys())
     tensors = torch.stack(
-        [preprocess(standardize_crop_for_clip(crops[c])) for c in cats]
+        [
+            preprocess(standardize_crop_for_clip(crops[c], enhance_texture=True))
+            for c in cats
+        ]
     ).to(device)
 
     with torch.inference_mode():
@@ -91,18 +94,6 @@ def match_features_batch(crops: dict, top_k: int = 1):
 def match_color(
     crop_rgb: np.ndarray, category: str, alpha_mask: np.ndarray = None
 ) -> int:
-    """
-    Finds the closest Mii palette index for a given feature crop.
-
-    Args:
-        crop_rgb: np.ndarray (H, W, 3) in RGB format.
-        category: 'hair', 'eyes', 'skin', 'mouths', 'eyebrows', etc.
-        alpha_mask: Optional boolean/binary mask (H, W) where 1/True represents feature pixels.
-
-    Returns:
-        int: The integer index (0 to N-1) corresponding to the libmii palette.
-    """
-    # Normalize category aliases
     if category in ["heads", "face", "skin"]:
         palette_key = "skin"
     elif category in ["lips", "mouth"]:
@@ -110,39 +101,46 @@ def match_color(
     elif category in MII_PALETTES_LAB:
         palette_key = category
     else:
-        raise ValueError(
-            f"No color palette defined for category '{category}'. Valid: {list(MII_PALETTES_LAB.keys())}"
-        )
+        raise ValueError(f"No color palette defined for category '{category}'.")
 
-    # 1. Isolate the pixels to evaluate
+    # 1. Isolate actual feature pixels (exclude white [255,255,255] background!)
     if alpha_mask is not None and np.any(alpha_mask > 0):
         pixels = crop_rgb[alpha_mask > 0]
     else:
-        # Special sampling rule for eyes:
-        # The center of an eye is the iris/pupil, while the outer corners are sclera (white)
-        h, w = crop_rgb.shape[:2]
-        if palette_key == "eyes":
-            # Sample central 30% to hit the iris, ignoring the sclera (white of eye)
-            pixels = crop_rgb[
-                int(h * 0.35) : int(h * 0.65), int(w * 0.35) : int(w * 0.65)
-            ].reshape(-1, 3)
-        else:
-            # General central 50% box to avoid background edge bleed
-            pixels = crop_rgb[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4].reshape(-1, 3)
+        non_white = np.any(crop_rgb < 250, axis=-1)
+        pixels = crop_rgb[non_white]
 
     if len(pixels) == 0:
         return 0
 
-    # 2. Extract representative pigment via median (rejects specular glares and harsh shadows)
-    median_rgb = np.median(pixels, axis=0).astype(np.uint8)
-    sample_lab = (
-        cv2.cvtColor(median_rgb.reshape(1, 1, 3), cv2.COLOR_RGB2LAB)
-        .reshape(3)
+    # 2. Convert all valid pixels to CIELAB to filter glare/shadows
+    pixels_lab = (
+        cv2.cvtColor(pixels.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
+        .reshape(-1, 3)
         .astype(np.float32)
     )
 
-    # 3. Euclidean distance (Delta E) in CIELAB
+    if palette_key == "eyes":
+        # For eyes, filter out bright sclera (whites of eyes, L > 180) and pure black pupil/lashes (L < 20)
+        iris_mask = (pixels_lab[:, 0] > 20) & (pixels_lab[:, 0] < 175)
+        if np.sum(iris_mask) > 10:
+            pixels_lab = pixels_lab[iris_mask]
+    else:
+        # Reject extreme shadow (bottom 15% L) and specular camera glare (top 15% L)
+        l_low, l_high = np.percentile(pixels_lab[:, 0], [15, 85])
+        mid_mask = (pixels_lab[:, 0] >= l_low) & (pixels_lab[:, 0] <= l_high)
+        if np.any(mid_mask):
+            pixels_lab = pixels_lab[mid_mask]
+
+    sample_lab = np.median(pixels_lab, axis=0)
+
+    # 3. Weighted Delta-E distance: downweight Lightness (L) by 0.5x so webcam exposure
+    # doesn't overpower true chroma/hue (A and B channels)
+    weights = np.array([0.5, 1.2, 1.2], dtype=np.float32)
     palette_labs = MII_PALETTES_LAB[palette_key]
-    distances = [np.linalg.norm(sample_lab - target_lab) for target_lab in palette_labs]
+    distances = [
+        np.linalg.norm((sample_lab - target_lab) * weights)
+        for target_lab in palette_labs
+    ]
 
     return int(np.argmin(distances))
