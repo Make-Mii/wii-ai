@@ -150,6 +150,7 @@ def save_face_parts(frame_bgr, masks, hair_mask,save_images=False):
         "nose": nose_img,
         "mouth": mouth_img,
         "heads": face_img,
+        "glasses": True,
     }
 
     if save_images:
