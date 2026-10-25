@@ -1,7 +1,7 @@
 # wii-ai
 
 <div align="center">
-  <img src="data/logo.png" alt="Make Mii Logo" width="300" />
+  <img src="assets/logo.png" alt="Make Mii Logo" width="300" />
 
   <p><strong>Real-time Mii avatar generation and rendering for the Nintendo Wii homebrew ecosystem</strong></p>
 
