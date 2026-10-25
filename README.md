@@ -12,7 +12,7 @@
 
 ## Overview
 
-A real time computer vision and machine learning pipeline developed for ![HackNotts26](https://hacknotts.com/).
+A real time computer vision and machine learning pipeline developed for ![HackNotts26](https://hacknotts.com/), the backend processing for [wii-make-mii](https://github.com/Make-Mii/wii-make-mii).
 This system captures a user's face via a webcam, extracts facial feature landmarks using Google's MediaPipe Face Landmarker, hair segmentation masks using MediaPipe Hair Image Segmention and then matches the geometry and colours to Nintendo Mii assets using OpenAI's CLIP. That resulting Mii configuration is then transmitted over UDP directly to a Nintendo [Wii homebrew application](https://github.com/Make-Mii/wii-make-mii) which allows display and saving to the devices memory.
 
 ## Installation and Setup
