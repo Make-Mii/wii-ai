@@ -136,7 +136,7 @@ def save_face_parts(frame_bgr, masks, hair_mask,save_images=False):
     skin_only_mask[eye_mask > 0] = 0
     skin_only_mask[brow_mask > 0] = 0
     skin_only_mask[masks[3] > 0] = 0
-    face_img = crop_image_to_mask(mask_to_image(frame_rgb, skin_only_mask), masks[4])
+    face_img = crop_image_to_mask(mask_to_image(frame_rgb, masks[4]), masks[4])
     face_img = cartoonify(face_img)
 
     # 6. Hair

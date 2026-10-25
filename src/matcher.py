@@ -103,40 +103,62 @@ def match_color(
     else:
         raise ValueError(f"No color palette defined for category '{category}'.")
 
-    # 1. Isolate actual feature pixels (exclude white [255,255,255] background!)
+    # 1. Strictly isolate foreground pixels (ignore [255, 255, 255] mask background)
     if alpha_mask is not None and np.any(alpha_mask > 0):
         pixels = crop_rgb[alpha_mask > 0]
     else:
-        non_white = np.any(crop_rgb < 250, axis=-1)
-        pixels = crop_rgb[non_white]
+        # A pixel is background if all channels are >= 250
+        fg_mask = ~np.all(crop_rgb >= 250, axis=-1)
+        pixels = crop_rgb[fg_mask]
 
-    if len(pixels) == 0:
+    if len(pixels) < 10:
         return 0
 
-    # 2. Convert all valid pixels to CIELAB to filter glare/shadows
+    # 2. Convert valid pixels to CIELAB
     pixels_lab = (
         cv2.cvtColor(pixels.reshape(-1, 1, 3), cv2.COLOR_RGB2LAB)
         .reshape(-1, 3)
         .astype(np.float32)
     )
 
-    if palette_key == "eyes":
-        # For eyes, filter out bright sclera (whites of eyes, L > 180) and pure black pupil/lashes (L < 20)
-        iris_mask = (pixels_lab[:, 0] > 20) & (pixels_lab[:, 0] < 175)
-        if np.sum(iris_mask) > 10:
-            pixels_lab = pixels_lab[iris_mask]
+    # 3. Category-specific pixel filtering & perceptual channel weights
+    if palette_key == "skin":
+        # Filter out facial hair/beard shadows (bottom 30% L) and specular forehead glare (top 15% L)
+        l_low, l_high = np.percentile(pixels_lab[:, 0], [30, 85])
+        valid = (pixels_lab[:, 0] >= l_low) & (pixels_lab[:, 0] <= l_high)
+        if np.any(valid):
+            pixels_lab = pixels_lab[valid]
+        # Skin tone depends primarily on Lightness (L), with softer chroma (A, B) weight
+        # because Mii middle skin tones are artificially orange
+        weights = np.array([1.2, 0.65, 0.65], dtype=np.float32)
+
+    elif palette_key == "hair":
+        # Filter out extreme specular shine from overhead lights and deep background shadow
+        l_low, l_high = np.percentile(pixels_lab[:, 0], [20, 80])
+        valid = (pixels_lab[:, 0] >= l_low) & (pixels_lab[:, 0] <= l_high)
+        if np.any(valid):
+            pixels_lab = pixels_lab[valid]
+        # Standard perceptual balance for hair
+        weights = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+    elif palette_key == "eyes":
+        # Filter out white sclera (L > 170) and black pupil/eyelashes (L < 35)
+        valid = (pixels_lab[:, 0] > 35) & (pixels_lab[:, 0] < 170)
+        if np.sum(valid) > 10:
+            pixels_lab = pixels_lab[valid]
+        # For iris color, hue/chroma (A, B) matters more than lighting
+        weights = np.array([0.6, 1.3, 1.3], dtype=np.float32)
+
     else:
-        # Reject extreme shadow (bottom 15% L) and specular camera glare (top 15% L)
-        l_low, l_high = np.percentile(pixels_lab[:, 0], [15, 85])
-        mid_mask = (pixels_lab[:, 0] >= l_low) & (pixels_lab[:, 0] <= l_high)
-        if np.any(mid_mask):
-            pixels_lab = pixels_lab[mid_mask]
+        # Mouths / Eyebrows / Glasses: standard Euclidean CIELAB Delta-E
+        l_low, l_high = np.percentile(pixels_lab[:, 0], [20, 85])
+        valid = (pixels_lab[:, 0] >= l_low) & (pixels_lab[:, 0] <= l_high)
+        if np.any(valid):
+            pixels_lab = pixels_lab[valid]
+        weights = np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
     sample_lab = np.median(pixels_lab, axis=0)
 
-    # 3. Weighted Delta-E distance: downweight Lightness (L) by 0.5x so webcam exposure
-    # doesn't overpower true chroma/hue (A and B channels)
-    weights = np.array([0.5, 1.2, 1.2], dtype=np.float32)
     palette_labs = MII_PALETTES_LAB[palette_key]
     distances = [
         np.linalg.norm((sample_lab - target_lab) * weights)
