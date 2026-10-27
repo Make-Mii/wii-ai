@@ -54,7 +54,7 @@ def has_glasses(raw_face_rgb: np.ndarray) -> bool:
 
 
 def main():
-    vid_cap = VideoCapture(source=33, max_queue_size=2)
+    vid_cap = VideoCapture(source=0, max_queue_size=2)
     vid_cap.start()
 
     MODEL_PATH = Path(__file__).resolve().parent.parent / "models/face_landmarker.task"
