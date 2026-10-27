@@ -1,5 +1,6 @@
 opencv-python==5.0.0.93
 mediapipe==1.1.1
 torch
-glasses-detector
+glasses-detector==0.1.1
 git+https://github.com/openai/CLIP.git
+transformers
